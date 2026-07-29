@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>VAPAPP — breath check-in prototype</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  :root{
+    --ink: #eef1f0;
+    --dim: #7f8b89;
+    --bg-0: #0a0f0e;
+    --bg-1: #0f1614;
+    --vapor: #9fe8d8;
+    --vapor-dim: #4d7a70;
+    --ember: #ff8a5c;
+    --line: rgba(159,232,216,0.14);
+  }
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
+
+  html,body{
+    margin:0; height:100%;
+    background: radial-gradient(120% 90% at 50% 0%, var(--bg-1), var(--bg-0) 70%);
+    color: var(--ink);
+    font-family: 'Space Grotesk', sans-serif;
+    overscroll-behavior: none;
+    user-select: none;
+    overflow:hidden;
+  }
+
+  .screen{
+    height:100dvh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding: 14px 20px 0;
+    position:relative;
+    overflow:hidden;
+  }
+
+  /* ambient drifting vapor lines */
+  .drift{
+    position:absolute; inset:0; pointer-events:none; opacity:0.18;
+  }
+  .drift span{
+    position:absolute;
+    width:1px;
+    background: linear-gradient(to top, transparent, var(--line), transparent);
+    animation: rise linear infinite;
+  }
+  @keyframes rise{
+    from{ transform: translateY(10%) scaleY(0.8); opacity:0; }
+    15%{ opacity:1; }
+    85%{ opacity:1; }
+    to{ transform: translateY(-110%) scaleY(1.2); opacity:0; }
+  }
+
+  header{
+    width:100%; max-width:420px;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    z-index:2;
+  }
+  .brand-block{ display:flex; flex-direction:column; gap:2px; padding-top:2px; }
+  .wordmark{
+    font-weight:700; letter-spacing:0.02em; font-size:15px;
+  }
+  .wordmark em{ font-style:normal; color:var(--vapor); }
+  .sub{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:10px; color:var(--dim); letter-spacing:0.08em; text-transform:uppercase;
+  }
+
+  .control-block{
+    display:flex; flex-direction:column; align-items:flex-end; gap:7px;
+  }
+  .btn-row{
+    display:flex; align-items:center; gap:8px;
+  }
+  .icon-btn{
+    display:flex; align-items:center; justify-content:center;
+    width:34px; height:34px;
+    background:transparent;
+    color: var(--vapor-dim);
+    border:1px solid rgba(159,232,216,0.22);
+    border-radius:100px;
+    cursor:pointer;
+    padding:0;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .icon-btn:active{ transform: scale(0.94); }
+  .icon-btn.muted{ color:#6c7a78; border-color: rgba(255,255,255,0.10); }
+
+  .top-panel{
+    flex:0 0 auto;
+    width:100%; max-width:420px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px;
+    z-index:2;
+    padding: 10px 0 12px;
+  }
+
+  .hint{
+    font-size:12px; color:var(--dim); text-align:center; max-width:250px; line-height:1.5;
+    opacity:0.75;
+  }
+
+  .count-wrap{
+    text-align:center;
+  }
+  .count-row{
+    display:flex; align-items:center; justify-content:center; gap:0;
+    position:relative;
+  }
+  .flash-word{
+    position:absolute;
+    top:50%;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13px; letter-spacing:0.08em; text-transform:uppercase;
+    color: var(--vapor);
+    white-space:nowrap;
+    opacity:0;
+    pointer-events:none;
+  }
+  .flash-left{ right:100%; margin-right:16px; transform: translate(8px,-50%); }
+  .flash-right{ left:100%; margin-left:16px; transform: translate(-8px,-50%); }
+  .flash-word.show{ animation: flash-pop 1.5s ease-out forwards; }
+  .flash-left.show{ animation-name: flash-pop-left; }
+  .flash-right.show{ animation-name: flash-pop-right; }
+  @keyframes flash-pop-left{
+    0%{ opacity:0; transform: translate(8px,-50%); }
+    18%{ opacity:1; transform: translate(0,-50%); }
+    70%{ opacity:1; transform: translate(0,-50%); }
+    100%{ opacity:0; transform: translate(-4px,-50%); }
+  }
+  @keyframes flash-pop-right{
+    0%{ opacity:0; transform: translate(-8px,-50%); }
+    18%{ opacity:1; transform: translate(0,-50%); }
+    70%{ opacity:1; transform: translate(0,-50%); }
+    100%{ opacity:0; transform: translate(4px,-50%); }
+  }
+  .count{
+    font-size:52px; font-weight:700; line-height:1;
+    letter-spacing:-0.03em;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 40px rgba(159,232,216,0.25);
+    transition: transform 0.15s ease;
+  }
+  .count.pulse{ transform: scale(1.12); }
+  .count-label{
+    margin-top:7px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--dim);
+  }
+
+  .status{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:10px; letter-spacing:0.04em; color:var(--dim);
+    text-align:right;
+    transition: color 0.2s ease;
+    max-width:120px;
+    line-height:1.3;
+  }
+  .status.live{ color: var(--vapor); }
+  .status.hit{ color: var(--ember); }
+
+  .mic-btn{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px; letter-spacing:0.08em; text-transform:uppercase;
+    background: transparent;
+    color: var(--vapor);
+    border: 1px solid var(--vapor-dim);
+    border-radius:100px;
+    padding:9px 18px;
+    cursor:pointer;
+  }
+  .mic-btn:active{ transform: scale(0.97); }
+  .mic-btn[disabled]{ opacity:0.4; }
+
+  /* ===== the device — anchored to the bottom edge, mouthpiece near the screen edge ===== */
+  .stage{
+    width:100%; max-width:420px;
+    flex:1 1 auto;
+    min-height:0;
+    display:flex; flex-direction:column; justify-content:flex-end;
+    z-index:2;
+    position:relative;
+  }
+  .device-zone{
+    position:relative;
+    width:100%;
+    height:100%;
+    display:flex; align-items:flex-end; justify-content:center;
+    padding-bottom:0;
+    min-height:0;
+  }
+  .device-svg{
+    height:100%;
+    max-height:640px;
+    width:auto;
+    display:block;
+    filter: drop-shadow(0 20px 40px rgba(0,0,0,0.5));
+    transition: transform 0.18s ease;
+  }
+
+  /* vapor puffs released after an inhale ends */
+  .vapor-layer{
+    position:absolute;
+    left:50%; bottom:6%;
+    width:1px; height:1px;
+    pointer-events:none;
+    z-index:3;
+  }
+  .puff{
+    position:absolute;
+    left:0; top:0;
+    width: var(--sz, 100px);
+    height: var(--sz, 100px);
+    margin-left: calc(var(--sz, 100px) / -2);
+    margin-top: calc(var(--sz, 100px) / -2);
+    border-radius:50%;
+    background: radial-gradient(circle, rgba(232,236,238,0.5), rgba(232,236,238,0) 70%);
+    filter: blur(6px);
+    opacity:0;
+    animation: puff-rise var(--dur, 2.2s) ease-out forwards;
+  }
+  @keyframes puff-rise{
+    0%{ opacity:0; transform: translate(0,0) scale(0.3); }
+    14%{ opacity:0.8; }
+    100%{
+      opacity:0;
+      transform: translate(var(--dx, 0px), var(--dy, -240px)) scale(var(--grow, 3.2));
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="screen">
+  <div class="drift" id="drift"></div>
+
+  <header>
+    <div class="brand-block">
+      <div class="wordmark">VAP<em>APP</em></div>
+    </div>
+    <div class="control-block">
+      <div class="btn-row">
+        <button class="icon-btn" id="muteBtn" aria-label="Mute sound">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4z"/>
+            <path id="waveOn" d="M16 9.2a4 4 0 0 1 0 5.6M18.6 6.6a7.6 7.6 0 0 1 0 10.8"/>
+            <path id="waveOff" d="M16.5 10l5 4M21.5 10l-5 4" style="display:none"/>
+          </svg>
+        </button>
+        <button class="mic-btn" id="micBtn">Start</button>
+      </div>
+      <div class="status" id="status">turn on mic</div>
+    </div>
+  </header>
+
+  <div class="top-panel">
+    <div class="count-wrap">
+      <div class="count-row">
+        <span class="flash-word flash-left" id="flashLeft"></span>
+        <div class="count" id="count">0</div>
+        <span class="flash-word flash-right" id="flashRight"></span>
+      </div>
+      <div class="count-label" id="countLabel">healthy hits</div>
+    </div>
+    <div class="hint">Craving hits? Breathe in at the bottom of your phone, near the mic.</div>
+  </div>
+
+  <div class="stage">
+    <div class="device-zone">
+
+      <svg class="device-svg" id="device" viewBox="0 0 280 620" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <!-- glossy black plastic: cylindrical falloff with rim light both edges -->
+          <linearGradient id="bodyGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#2b2f33"/>
+            <stop offset="4%"   stop-color="#484f56"/>
+            <stop offset="11%"  stop-color="#22262a"/>
+            <stop offset="30%"  stop-color="#0d0f11"/>
+            <stop offset="62%"  stop-color="#08090a"/>
+            <stop offset="86%"  stop-color="#181c20"/>
+            <stop offset="95%"  stop-color="#3a4148"/>
+            <stop offset="100%" stop-color="#1a1d20"/>
+          </linearGradient>
+
+          <!-- vertical sheen overlay: brighter near top, falls off toward base -->
+          <linearGradient id="sheenGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.16"/>
+            <stop offset="18%"  stop-color="#ffffff" stop-opacity="0.05"/>
+            <stop offset="55%"  stop-color="#ffffff" stop-opacity="0"/>
+            <stop offset="100%" stop-color="#000000" stop-opacity="0.25"/>
+          </linearGradient>
+
+          <!-- narrow specular strip down the left face -->
+          <linearGradient id="specGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#ffffff" stop-opacity="0"/>
+            <stop offset="45%"  stop-color="#ffffff" stop-opacity="0.30"/>
+            <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+          </linearGradient>
+
+          <!-- brushed metal band, copper/rose like the reference device -->
+          <linearGradient id="metalGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#6d4a3c"/>
+            <stop offset="8%"   stop-color="#c99178"/>
+            <stop offset="22%"  stop-color="#a8705b"/>
+            <stop offset="50%"  stop-color="#8a5844"/>
+            <stop offset="78%"  stop-color="#b57e67"/>
+            <stop offset="92%"  stop-color="#d9a58e"/>
+            <stop offset="100%" stop-color="#6b483a"/>
+          </linearGradient>
+
+          <!-- matte rubber mouthpiece -->
+          <linearGradient id="tipGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#191b1d"/>
+            <stop offset="12%"  stop-color="#303438"/>
+            <stop offset="40%"  stop-color="#0c0d0f"/>
+            <stop offset="75%"  stop-color="#08090a"/>
+            <stop offset="93%"  stop-color="#26292d"/>
+            <stop offset="100%" stop-color="#111315"/>
+          </linearGradient>
+
+          <!-- recessed juice window glass -->
+          <linearGradient id="windowGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%"   stop-color="#141719" stop-opacity="0.95"/>
+            <stop offset="45%"  stop-color="#050607"/>
+            <stop offset="100%" stop-color="#0b0d0f"/>
+          </linearGradient>
+
+          <linearGradient id="juiceGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stop-color="#8fd8c4" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#3d7e6d" stop-opacity="0.75"/>
+          </linearGradient>
+
+          <radialGradient id="glowGrad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"   stop-color="#ffd9a8" stop-opacity="0.85"/>
+            <stop offset="100%" stop-color="#ffd9a8" stop-opacity="0"/>
+          </radialGradient>
+
+          <radialGradient id="ledGrad" cx="38%" cy="34%" r="70%">
+            <stop offset="0%"   stop-color="#7d8a86"/>
+            <stop offset="100%" stop-color="#2a3230"/>
+          </radialGradient>
+
+          <!-- soft contact shadow under the device -->
+          <radialGradient id="floorShadow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"   stop-color="#000000" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+          </radialGradient>
+
+          <clipPath id="bodyClip">
+            <rect x="20" y="34" width="240" height="462" rx="30"/>
+          </clipPath>
+        </defs>
+
+        <!-- ambient hit glow at the mouthpiece, hidden by default -->
+        <circle id="hitGlow" cx="140" cy="556" r="10" fill="url(#glowGrad)" opacity="0"/>
+
+        <!-- ============ mouthpiece (drawn first so body overlaps its base) ============ -->
+        <path id="tip"
+              d="M94 486 L186 486 L179 566 A11 11 0 0 1 168 577 L112 577 A11 11 0 0 1 101 566 Z"
+              fill="url(#tipGrad)"/>
+        <!-- mouthpiece slot -->
+        <rect x="124" y="571" width="32" height="4" rx="2" fill="#000000" opacity="0.75"/>
+        <!-- mouthpiece left specular -->
+        <path d="M106 492 L115 492 L110 566 L104 562 Z" fill="#ffffff" opacity="0.10"/>
+
+        <!-- ============ metal base band ============ -->
+        <rect x="20" y="418" width="240" height="82" rx="14" fill="url(#metalGrad)"/>
+        <!-- fine brushed-metal striations -->
+        <g opacity="0.16">
+          <line x1="44"  y1="424" x2="44"  y2="494" stroke="#ffffff" stroke-width="0.6"/>
+          <line x1="72"  y1="424" x2="72"  y2="494" stroke="#ffffff" stroke-width="0.5"/>
+          <line x1="108" y1="424" x2="108" y2="494" stroke="#ffffff" stroke-width="0.4"/>
+          <line x1="164" y1="424" x2="164" y2="494" stroke="#ffffff" stroke-width="0.4"/>
+          <line x1="204" y1="424" x2="204" y2="494" stroke="#ffffff" stroke-width="0.5"/>
+          <line x1="232" y1="424" x2="232" y2="494" stroke="#ffffff" stroke-width="0.6"/>
+        </g>
+        <!-- band top edge catch-light -->
+        <rect x="20" y="418" width="240" height="2.5" fill="#f0c3ac" opacity="0.5"/>
+        <!-- band bottom shading -->
+        <rect x="20" y="486" width="240" height="14" rx="10" fill="#000000" opacity="0.28"/>
+
+        <!-- ============ main body ============ -->
+        <rect x="20" y="34" width="240" height="462" rx="30" fill="url(#bodyGrad)"/>
+        <g clip-path="url(#bodyClip)">
+          <!-- vertical sheen -->
+          <rect x="20" y="34" width="240" height="462" fill="url(#sheenGrad)"/>
+          <!-- broad soft specular down the left face -->
+          <rect x="34" y="34" width="46" height="462" fill="url(#specGrad)"/>
+          <!-- tight highlight line, left edge -->
+          <rect x="30" y="52" width="4" height="418" rx="2" fill="#ffffff" opacity="0.30"/>
+          <!-- rim light, right edge -->
+          <rect x="248" y="60" width="3" height="400" rx="1.5" fill="#ffffff" opacity="0.16"/>
+          <!-- reflected environment streak across the upper body -->
+          <path d="M20 96 Q140 128 260 88 L260 132 Q140 168 20 140 Z" fill="#ffffff" opacity="0.035"/>
+          <!-- shadow where the metal band meets the body -->
+          <rect x="20" y="470" width="240" height="26" fill="#000000" opacity="0.35"/>
+        </g>
+
+        <!-- ============ display panel ============ -->
+        <rect x="72" y="176" width="136" height="236" rx="18" fill="url(#windowGrad)"/>
+
+        <!-- radial dot matrix (populated by JS) -->
+        <g id="dotMatrix"></g>
+
+        <!-- inner readout ring -->
+        <circle id="dispRing" cx="140" cy="294" r="42" fill="none" stroke="#2e6f8f" stroke-width="2" opacity="0.5"/>
+        <circle cx="140" cy="294" r="42" fill="#000000" opacity="0.35"/>
+
+        <!-- readout: count + live level -->
+        <text id="dispCount" x="140" y="290" text-anchor="middle"
+              font-family="'IBM Plex Mono', monospace" font-size="30" font-weight="500"
+              fill="#8fd0ff" opacity="0.9" letter-spacing="1">0</text>
+        <text id="dispPct" x="140" y="312" text-anchor="middle"
+              font-family="'IBM Plex Mono', monospace" font-size="12"
+              fill="#5fa8dd" opacity="0.65" letter-spacing="1">00%</text>
+
+        <!-- glass surface reflection over the whole panel -->
+        <path d="M78 182 L112 182 L92 406 L78 406 Z" fill="#ffffff" opacity="0.05"/>
+        <!-- inset border: dark outside, faint light inside (recessed read) -->
+        <rect x="72" y="176" width="136" height="236" rx="18" fill="none" stroke="#000000" stroke-opacity="0.7" stroke-width="2"/>
+        <rect x="74" y="178" width="132" height="232" rx="17" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="1"/>
+
+        <!-- ============ engraved wordmark ============ -->
+        <g font-family="'Space Grotesk', sans-serif" font-size="17" font-weight="700" letter-spacing="4" text-anchor="middle">
+          <!-- lower bevel catch-light, offset down 1px -->
+          <text x="140" y="97.5" fill="#ffffff" opacity="0.22">VAPAPP</text>
+          <!-- engraved face -->
+          <text x="140" y="96" fill="#0a0c0d" opacity="0.6">VAPAPP</text>
+        </g>
+
+        <!-- ============ LED indicator ============ -->
+        <circle cx="140" cy="140" r="9" fill="#000000" opacity="0.55"/>
+        <circle id="ledDot" cx="140" cy="140" r="7" fill="url(#ledGrad)"/>
+        <circle cx="137.5" cy="137.5" r="2" fill="#ffffff" opacity="0.28"/>
+
+        <!-- contact shadow -->
+        <ellipse cx="140" cy="592" rx="96" ry="12" fill="url(#floorShadow)"/>
+      </svg>
+      <div class="vapor-layer" id="vaporLayer"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const status = $('status'), countEl = $('count');
+const micBtn = $('micBtn'), flashLeft = $('flashLeft'), flashRight = $('flashRight'), countLabel = $('countLabel');
+const device = $('device'), hitGlow = $('hitGlow'), ledDot = $('ledDot'), tip = $('tip'), vaporLayer = $('vaporLayer');
+const dotMatrix = $('dotMatrix'), dispCount = $('dispCount'), dispPct = $('dispPct'), dispRing = $('dispRing');
+const muteBtn = $('muteBtn'), waveOn = $('waveOn'), waveOff = $('waveOff');
+
+let muted = false;
+muteBtn.addEventListener('click', ()=>{
+  muted = !muted;
+  muteBtn.classList.toggle('muted', muted);
+  waveOn.style.display = muted ? 'none' : '';
+  waveOff.style.display = muted ? '' : 'none';
+  muteBtn.setAttribute('aria-label', muted ? 'Unmute sound' : 'Mute sound');
+});
+
+let count = 0;
+let audioCtx, analyser, source, dataArray, rafId, micStream;
+let listening = false;
+
+// inhale-detection state machine
+// we look for: quiet -> rising energy sustained above threshold for a min duration -> falling back to quiet
+const RMS_ON = 0.032;     // energy level considered "breath starting"
+const RMS_OFF = 0.016;    // energy level considered "breath ended"
+const MIN_HOLD_MS = 260;  // minimum sustained duration to count as a real inhale (filters taps/pops)
+const MAX_HOLD_MS = 2500; // cap so it doesn't count you talking for 10s
+const COOLDOWN_MS = 700;  // avoid double counting one breath
+
+let breathStart = null;
+let lastHitAt = 0;
+let smoothed = 0;
+
+function makeDrift(){
+  const wrap = $('drift');
+  const n = 14;
+  for(let i=0;i<n;i++){
+    const s = document.createElement('span');
+    const left = Math.random()*100;
+    const height = 40 + Math.random()*90;
+    const dur = 7 + Math.random()*9;
+    const delay = -Math.random()*dur;
+    s.style.left = left+'%';
+    s.style.height = height+'px';
+    s.style.bottom = '-10%';
+    s.style.animationDuration = dur+'s';
+    s.style.animationDelay = delay+'s';
+    wrap.appendChild(s);
+  }
+}
+makeDrift();
+
+// ===== radial LED dot matrix on the device display =====
+const RINGS = [
+  { r: 52,  n: 20 },
+  { r: 62,  n: 24 },
+  { r: 72,  n: 28 },
+  { r: 82,  n: 32 },
+  { r: 92,  n: 36 }
+];
+const CX = 140, CY = 294;
+const PANEL = { x: 72, y: 176, w: 136, h: 236 };
+const dots = [];
+
+function buildMatrix(){
+  const NS = 'http://www.w3.org/2000/svg';
+  RINGS.forEach((ring, ri)=>{
+    for(let i=0;i<ring.n;i++){
+      const a = (i / ring.n) * Math.PI * 2 - Math.PI/2;
+      const x = CX + Math.cos(a) * ring.r;
+      const y = CY + Math.sin(a) * ring.r * 1.06;
+      // clip to the panel bounds so dots don't spill past the glass
+      if(x < PANEL.x + 8 || x > PANEL.x + PANEL.w - 8) continue;
+      if(y < PANEL.y + 8 || y > PANEL.y + PANEL.h - 8) continue;
+      const d = document.createElementNS(NS, 'circle');
+      d.setAttribute('cx', x.toFixed(1));
+      d.setAttribute('cy', y.toFixed(1));
+      d.setAttribute('r', '1.7');
+      d.setAttribute('fill', '#8fd0ff');
+      d.setAttribute('opacity', '0.08');
+      dotMatrix.appendChild(d);
+      dots.push({ el: d, ring: ri });
+    }
+  });
+}
+buildMatrix();
+
+let shownLevel = 0;
+
+function setDisplayLevel(pct){
+  // ease toward target so the rings feel like they're filling, not flickering
+  shownLevel += (pct - shownLevel) * 0.35;
+  const lit = (shownLevel / 100) * RINGS.length;
+  dots.forEach(d=>{
+    const depth = lit - d.ring;
+    let o;
+    if(depth >= 1)      o = 0.95;
+    else if(depth <= 0) o = 0.08;
+    else                o = 0.08 + depth * 0.87;
+    d.el.setAttribute('opacity', o.toFixed(2));
+  });
+  dispPct.textContent = String(Math.round(shownLevel)).padStart(2,'0') + '%';
+  dispRing.setAttribute('opacity', (0.35 + (shownLevel/100) * 0.6).toFixed(2));
+}
+
+function flashMatrix(){
+  // full-ring flare on a successful hit
+  dots.forEach((d, i)=>{
+    setTimeout(()=>{
+      d.el.setAttribute('fill', '#d8f0ff');
+      d.el.setAttribute('opacity', '1');
+      setTimeout(()=>{
+        d.el.setAttribute('fill', '#8fd0ff');
+      }, 260);
+    }, d.ring * 45);
+  });
+}
+
+function setStatus(text, mode){
+  status.innerHTML = text;
+  status.className = 'status' + (mode ? ' '+mode : '');
+}
+
+function flashHit(){
+  flashLeft.textContent = 'hit ' + count;
+  flashRight.textContent = 'logged';
+  flashLeft.classList.remove('show');
+  flashRight.classList.remove('show');
+  // force reflow so the animation can retrigger on rapid hits
+  void flashLeft.offsetWidth;
+  flashLeft.classList.add('show');
+  flashRight.classList.add('show');
+}
+
+function spawnVapor(){
+  const n = 9 + Math.floor(Math.random()*4);
+  for(let i=0;i<n;i++){
+    const p = document.createElement('div');
+    p.className = 'puff';
+    const dx = (Math.random()-0.5)*240;
+    const dy = -(180 + Math.random()*160);
+    const sz = 80 + Math.random()*90;
+    const dur = 1.9 + Math.random()*1.2;
+    const grow = 2.6 + Math.random()*2.0;
+    const delay = Math.random()*260;
+    p.style.setProperty('--dx', dx+'px');
+    p.style.setProperty('--dy', dy+'px');
+    p.style.setProperty('--sz', sz+'px');
+    p.style.setProperty('--dur', dur+'s');
+    p.style.setProperty('--grow', grow);
+    p.style.animationDelay = delay+'ms';
+    vaporLayer.appendChild(p);
+    setTimeout(()=> p.remove(), (dur*1000)+delay+200);
+  }
+}
+
+function playHitSound(){
+  if(!audioCtx || muted) return;
+  const now = audioCtx.currentTime;
+
+  // brief pause before the exhale begins
+  const pause = 0.28;
+  const dur = 1.5;            // slow, breathy release
+  const t0 = now + pause;
+
+  // --- breathy whoosh: long filtered-noise exhale ---
+  const bufSize = Math.floor(audioCtx.sampleRate * (dur + 0.2));
+  const buffer = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for(let i=0;i<bufSize;i++){ data[i] = (Math.random()*2-1); }
+
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buffer;
+
+  // bandpass gently sweeping down = air emptying out slowly
+  const bandpass = audioCtx.createBiquadFilter();
+  bandpass.type = 'bandpass';
+  bandpass.frequency.setValueAtTime(1100, t0);
+  bandpass.frequency.linearRampToValueAtTime(1500, t0 + 0.4);
+  bandpass.frequency.exponentialRampToValueAtTime(360, t0 + dur);
+  bandpass.Q.value = 0.9;
+
+  // soft low-pass to keep it breathy, not hissy
+  const lowpass = audioCtx.createBiquadFilter();
+  lowpass.type = 'lowpass';
+  lowpass.frequency.value = 2600;
+
+  // slow swell in, long tail out
+  const noiseGain = audioCtx.createGain();
+  noiseGain.gain.setValueAtTime(0.0001, t0);
+  noiseGain.gain.linearRampToValueAtTime(0.28, t0 + 0.5);
+  noiseGain.gain.linearRampToValueAtTime(0.22, t0 + dur * 0.6);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
+
+  noise.connect(bandpass);
+  bandpass.connect(lowpass);
+  lowpass.connect(noiseGain);
+  noiseGain.connect(audioCtx.destination);
+  noise.start(t0);
+  noise.stop(t0 + dur + 0.1);
+
+  // --- single soft confirmation tone, low and late so it doesn't feel "quick" ---
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = 528;
+  gain.gain.setValueAtTime(0, t0 + dur * 0.5);
+  gain.gain.linearRampToValueAtTime(0.06, t0 + dur * 0.5 + 0.15);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur + 0.2);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(t0 + dur * 0.5);
+  osc.stop(t0 + dur + 0.3);
+}
+
+function registerHit(){
+  count++;
+  playHitSound();
+  countEl.textContent = count;
+  dispCount.textContent = count;
+  flashMatrix();
+  countEl.classList.add('pulse');
+  setTimeout(()=> countEl.classList.remove('pulse'), 150);
+
+  // tip glow flare
+  hitGlow.setAttribute('opacity', '1');
+  hitGlow.setAttribute('r', '4');
+  let r = 4;
+  const grow = setInterval(()=>{
+    r += 6;
+    hitGlow.setAttribute('r', r);
+    hitGlow.setAttribute('opacity', Math.max(0, 1 - r/70));
+    if(r > 70){ clearInterval(grow); hitGlow.setAttribute('opacity','0'); }
+  }, 16);
+
+  ledDot.setAttribute('fill', '#ffb066');
+  setTimeout(()=> ledDot.setAttribute('fill', listening ? '#8fd8c4' : 'url(#ledGrad)'), 400);
+
+  device.style.transform = 'scale(1.015)';
+  setTimeout(()=> device.style.transform = 'scale(1)', 180);
+
+  flashHit();
+  if(navigator.vibrate) navigator.vibrate([30, 40, 60]);
+}
+
+async function start(){
+  try{
+    micBtn.disabled = true;
+    setStatus('requesting mic…');
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation:false, noiseSuppression:false, autoGainControl:false
+    }});
+    micStream = stream;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.15;
+    source.connect(analyser);
+    dataArray = new Uint8Array(analyser.fftSize);
+
+    listening = true;
+    micBtn.textContent = 'Stop';
+    micBtn.disabled = false;
+    countLabel.textContent = 'healthy hits';
+    setStatus('turn off mic', 'live');
+    ledDot.setAttribute('fill', '#8fd8c4');
+    tick();
+  }catch(err){
+    setStatus('mic blocked — check permissions');
+    micBtn.disabled = false;
+    console.error(err);
+  }
+}
+
+function stop(){
+  listening = false;
+  if(rafId) cancelAnimationFrame(rafId);
+  if(micStream){
+    micStream.getTracks().forEach(track => track.stop());
+    micStream = null;
+  }
+  if(audioCtx) audioCtx.close();
+  micBtn.textContent = 'Start';
+  shownLevel = 0;
+  setDisplayLevel(0);
+  ledDot.setAttribute('fill', 'url(#ledGrad)');
+  setStatus('turn on mic');
+  breathStart = null;
+}
+
+function tick(){
+  if(!listening) return;
+  analyser.getByteTimeDomainData(dataArray);
+
+  let sumSquares = 0;
+  for(let i=0;i<dataArray.length;i++){
+    const v = (dataArray[i]-128)/128;
+    sumSquares += v*v;
+  }
+  const rms = Math.sqrt(sumSquares/dataArray.length);
+  smoothed = smoothed*0.7 + rms*0.3;
+
+  const pct = Math.min(100, Math.round((smoothed/0.2)*100));
+  setDisplayLevel(pct);
+
+  const now = performance.now();
+
+  if(smoothed > RMS_ON){
+    if(breathStart === null) breathStart = now;
+    const held = now - breathStart;
+    if(held > MIN_HOLD_MS){
+      ledDot.setAttribute('fill', '#d7fff2');
+    }
+  } else if(smoothed < RMS_OFF && breathStart !== null){
+    const held = now - breathStart;
+    if(held >= MIN_HOLD_MS && held <= MAX_HOLD_MS && (now - lastHitAt) > COOLDOWN_MS){
+      lastHitAt = now;
+      registerHit();
+      setTimeout(spawnVapor, 280);
+    }
+    breathStart = null;
+    if((now - lastHitAt) > 300) ledDot.setAttribute('fill', '#8fd8c4');
+  }
+
+  rafId = requestAnimationFrame(tick);
+}
+
+micBtn.addEventListener('click', ()=>{
+  if(!listening) start(); else stop();
+});
+</script>
+
+</body>
+</html>
